@@ -1,0 +1,231 @@
+import 'package:flutter/foundation.dart';
+import '../../../models/staff.dart';
+import '../../../core/auth/auth_service.dart';
+
+/// Authentication state management provider
+class AuthProvider extends ChangeNotifier {
+  final AuthService _authService = AuthService();
+
+  Staff? _currentStaff;
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _isAuthenticated = false;
+
+  // Getters
+  Staff? get currentStaff => _currentStaff;
+  bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
+  bool get isAuthenticated => _isAuthenticated;
+
+  // Computed getters
+  String get staffName => _currentStaff?.name ?? 'Staff';
+  String get staffRole => _currentStaff?.role ?? 'staff';
+  String get staffEmail => _currentStaff?.email ?? '';
+  bool get isActive => _currentStaff?.status == 'active';
+
+  /// Initialize auth state on app start
+  Future<void> initializeAuth() async {
+    _setLoading(true);
+
+    try {
+      await _authService.initializeAuth();
+      final isLoggedIn = await _authService.isLoggedIn();
+
+      if (isLoggedIn) {
+        _currentStaff = await _authService.getCurrentStaff();
+        _isAuthenticated = true;
+      }
+    } catch (e) {
+      _setError('Failed to initialize authentication');
+      debugPrint('Auth initialization error: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Login with email and password
+  Future<bool> login(String email, String password) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      // Validate inputs
+      if (email.isEmpty || password.isEmpty) {
+        _setError('Please enter email and password');
+        return false;
+      }
+
+      if (!_isValidEmail(email)) {
+        _setError('Please enter a valid email address');
+        return false;
+      }
+
+      // Attempt login
+      final staff = await _authService.login(email, password);
+
+      _currentStaff = staff;
+      _isAuthenticated = true;
+      _setLoading(false);
+
+      return true;
+    } on AuthException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Login failed. Please try again.');
+      debugPrint('Login error: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Register new staff (if allowed)
+  Future<bool> register({
+    required String email,
+    required String password,
+    required String name,
+    required String phone,
+    required String role,
+  }) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      // Validate inputs
+      if (email.isEmpty || password.isEmpty || name.isEmpty || phone.isEmpty) {
+        _setError('Please fill in all fields');
+        return false;
+      }
+
+      if (!_isValidEmail(email)) {
+        _setError('Please enter a valid email address');
+        return false;
+      }
+
+      if (password.length < 6) {
+        _setError('Password must be at least 6 characters');
+        return false;
+      }
+
+      // Attempt registration
+      final staff = await _authService.register(
+        email: email,
+        password: password,
+        name: name,
+        phone: phone,
+        role: role,
+      );
+
+      _currentStaff = staff;
+      _isAuthenticated = true;
+      _setLoading(false);
+
+      return true;
+    } on AuthException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Registration failed. Please try again.');
+      debugPrint('Registration error: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Logout
+  Future<void> logout() async {
+    _setLoading(true);
+
+    try {
+      await _authService.logout();
+      _currentStaff = null;
+      _isAuthenticated = false;
+      _clearError();
+    } catch (e) {
+      _setError('Logout failed');
+      debugPrint('Logout error: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Refresh staff data from backend
+  Future<void> refreshStaffData() async {
+    try {
+      _currentStaff = await _authService.getCurrentStaff();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to refresh staff data: $e');
+    }
+  }
+
+  /// Update FCM token
+  Future<void> updateFcmToken(String fcmToken) async {
+    try {
+      await _authService.updateFcmToken(fcmToken);
+
+      // Update local staff data
+      if (_currentStaff != null) {
+        _currentStaff = _currentStaff!.copyWith(fcmToken: fcmToken);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Failed to update FCM token: $e');
+    }
+  }
+
+  /// Request password reset
+  Future<bool> resetPassword(String email) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      if (email.isEmpty) {
+        _setError('Please enter your email address');
+        return false;
+      }
+
+      if (!_isValidEmail(email)) {
+        _setError('Please enter a valid email address');
+        return false;
+      }
+
+      await _authService.resetPassword(email);
+      _setLoading(false);
+      return true;
+    } on AuthException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Failed to send reset email');
+      debugPrint('Password reset error: $e');
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // Private helper methods
+
+  void _setLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+
+  void _setError(String message) {
+    _errorMessage = message;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  void _clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+  }
+}

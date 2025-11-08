@@ -1,0 +1,237 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../models/staff.dart';
+import '../api/api_client.dart';
+import '../constants/api_endpoints.dart';
+import 'token_storage.dart';
+
+/// Authentication service that handles Firebase Auth + Backend API
+class AuthService {
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final ApiClient _apiClient = ApiClient();
+
+  // ===== Authentication Methods =====
+
+  /// Login with email and password
+  /// 1. Authenticate with Firebase
+  /// 2. Get Firebase UID
+  /// 3. Send to backend for JWT token
+  /// 4. Store JWT and staff data
+  Future<Staff> login(String email, String password) async {
+    try {
+      // Step 1: Firebase authentication
+      final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Step 2: Get Firebase UID
+      final firebaseUid = userCredential.user?.uid;
+      if (firebaseUid == null) {
+        throw AuthException('Failed to get Firebase UID');
+      }
+
+      // Step 3: Send to backend for JWT token
+      final response = await _apiClient.post(ApiEndpoints.staffLogin, {
+        'email': email,
+        'firebaseUid': firebaseUid,
+      }, requiresAuth: false);
+
+      // Step 4: Extract JWT token and staff data
+      final token = response['token'] as String?;
+      if (token == null) {
+        throw AuthException('No token received from server');
+      }
+
+      final staffData = response['staff'] as Map<String, dynamic>?;
+      if (staffData == null) {
+        throw AuthException('No staff data received from server');
+      }
+
+      final staff = Staff.fromJson(staffData);
+
+      // Step 5: Store token and staff data
+      await TokenStorage.saveToken(token);
+      await TokenStorage.saveStaffData(staff);
+
+      // Set token for future API requests
+      _apiClient.setAuthToken(token);
+
+      return staff;
+    } on FirebaseAuthException catch (e) {
+      throw _handleFirebaseAuthException(e);
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      throw AuthException('Login failed: $e');
+    }
+  }
+
+  /// Register new staff (if allowed)
+  /// Note: In production, this should be admin-only
+  Future<Staff> register({
+    required String email,
+    required String password,
+    required String name,
+    required String phone,
+    required String role,
+  }) async {
+    try {
+      // Step 1: Create Firebase user
+      final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // Step 2: Get Firebase ID token
+      final firebaseToken = await userCredential.user?.getIdToken();
+      if (firebaseToken == null) {
+        throw AuthException('Failed to get Firebase token');
+      }
+
+      // Step 3: Register with backend
+      final response = await _apiClient.post(ApiEndpoints.staffRegister, {
+        'firebaseUid': userCredential.user!.uid,
+        'email': email,
+        'name': name,
+        'phone': phone,
+        'role': role,
+      }, requiresAuth: false);
+
+      // Step 4: Extract JWT token and staff data
+      final token = response['token'] as String?;
+      if (token == null) {
+        throw AuthException('No token received from server');
+      }
+
+      final staffData = response['staff'] as Map<String, dynamic>?;
+      if (staffData == null) {
+        throw AuthException('No staff data received from server');
+      }
+
+      final staff = Staff.fromJson(staffData);
+
+      // Step 5: Store token and staff data
+      await TokenStorage.saveToken(token);
+      await TokenStorage.saveStaffData(staff);
+
+      // Set token for future API requests
+      _apiClient.setAuthToken(token);
+
+      return staff;
+    } on FirebaseAuthException catch (e) {
+      throw _handleFirebaseAuthException(e);
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      throw AuthException('Registration failed: $e');
+    }
+  }
+
+  /// Logout
+  /// 1. Sign out from Firebase
+  /// 2. Clear all stored data
+  /// 3. Clear API client token
+  Future<void> logout() async {
+    try {
+      await _firebaseAuth.signOut();
+      await TokenStorage.clearAll();
+      _apiClient.clearAuthToken();
+    } catch (e) {
+      throw AuthException('Logout failed: $e');
+    }
+  }
+
+  /// Check if user is logged in
+  Future<bool> isLoggedIn() async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    final hasStoredData = await TokenStorage.isLoggedIn();
+    return firebaseUser != null && hasStoredData;
+  }
+
+  /// Get current staff from storage
+  Future<Staff?> getCurrentStaff() async {
+    return await TokenStorage.getStaffData();
+  }
+
+  /// Initialize auth on app start
+  /// Load token and set it in API client
+  Future<void> initializeAuth() async {
+    final token = await TokenStorage.getToken();
+    if (token != null) {
+      _apiClient.setAuthToken(token);
+    }
+  }
+
+  /// Update FCM token on backend
+  Future<void> updateFcmToken(String fcmToken) async {
+    try {
+      await _apiClient.put(ApiEndpoints.updateFcmToken, {'fcmToken': fcmToken});
+
+      // Save locally
+      await TokenStorage.saveFcmToken(fcmToken);
+
+      // Update staff data
+      final staff = await getCurrentStaff();
+      if (staff != null) {
+        final updatedStaff = staff.copyWith(fcmToken: fcmToken);
+        await TokenStorage.saveStaffData(updatedStaff);
+      }
+    } catch (e) {
+      throw AuthException('Failed to update FCM token: $e');
+    }
+  }
+
+  /// Request password reset
+  Future<void> resetPassword(String email) async {
+    try {
+      await _firebaseAuth.sendPasswordResetEmail(email: email);
+    } on FirebaseAuthException catch (e) {
+      throw _handleFirebaseAuthException(e);
+    }
+  }
+
+  // ===== Helper Methods =====
+
+  /// Handle Firebase Auth exceptions
+  AuthException _handleFirebaseAuthException(FirebaseAuthException e) {
+    String message;
+
+    switch (e.code) {
+      case 'user-not-found':
+        message = 'No account found with this email';
+        break;
+      case 'wrong-password':
+        message = 'Incorrect password';
+        break;
+      case 'email-already-in-use':
+        message = 'An account already exists with this email';
+        break;
+      case 'invalid-email':
+        message = 'Invalid email address';
+        break;
+      case 'weak-password':
+        message = 'Password is too weak';
+        break;
+      case 'user-disabled':
+        message = 'This account has been disabled';
+        break;
+      case 'too-many-requests':
+        message = 'Too many attempts. Please try again later';
+        break;
+      case 'network-request-failed':
+        message = 'Network error. Please check your connection';
+        break;
+      default:
+        message = e.message ?? 'Authentication failed';
+    }
+
+    return AuthException(message);
+  }
+}
+
+/// Custom authentication exception
+class AuthException implements Exception {
+  final String message;
+  AuthException(this.message);
+
+  @override
+  String toString() => message;
+}
