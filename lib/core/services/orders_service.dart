@@ -3,7 +3,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OrdersService {
-  static const String baseUrl = 'http://127.0.0.1:5001/api/staff';
+  // Use production URL
+  static const String baseUrl = 'https://almaryarostary.onrender.com/api/staff';
+
+  // Local Development URL (uncomment for development)
+  // static const String baseUrl = 'http://127.0.0.1:5001/api/staff';
 
   /// Fetch orders for staff
   /// [status] can be 'pending', 'assigned', or null for all

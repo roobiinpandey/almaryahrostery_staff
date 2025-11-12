@@ -1,11 +1,11 @@
-/// API Endpoints for Al Marya Rostery Staff App
-///
-/// Backend Server: http://localhost:5001
+/// API Endpoints Configuration
 /// For production, update baseUrl to production server URL
-
 class ApiEndpoints {
-  // Base URL - Change for production
-  static const String baseUrl = 'http://localhost:5001';
+  // Production URL (Render.com)
+  static const String baseUrl = 'https://almaryarostary.onrender.com';
+
+  // Local Development URL (uncomment for development)
+  // static const String baseUrl = 'http://localhost:5001';
 
   // Staff Authentication Endpoints
   static const String staffLogin = '$baseUrl/api/staff/login';

@@ -5,7 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// PIN + QR Badge Authentication Service
 /// Handles staff authentication using Employee ID + PIN or QR badge scanning
 class PinAuthService {
-  static const String baseUrl = 'http://127.0.0.1:5001/api/staff/auth';
+  static const String baseUrl =
+      'https://almaryarostary.onrender.com/api/staff/auth';
 
   // Cache keys
   static const String _tokenKey = 'staff_token';
